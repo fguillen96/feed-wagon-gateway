@@ -1,4 +1,4 @@
 .pio
-.vscode
+.vscodeg
 include/secrets.h
 feed-wagon-gateway.code-workspace

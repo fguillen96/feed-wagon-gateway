@@ -26,17 +26,16 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
 
 void onMqttConnect(bool sessionPresent) {
   ESP_LOGD(TAG, "Connected to MQTT");
+
+  // TODO
 }
 
 
 void publishMqttTask(void * parameters)  {
   //publishElement  publishElement_t;
+  // TODO
 
   for(;;) {
     //BaseType_t data_read = xQueueReceive(xQueueSendToMqtt, &lora_buffer, pdMS_TO_TICKS(5000));
-    digitalWrite(DO_BUZZER, HIGH);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    digitalWrite(DO_BUZZER, LOW);
-    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
