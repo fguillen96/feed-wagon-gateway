@@ -6,7 +6,7 @@ The information received is:
 * Motor voltage
 * Status of reed sensor
 
-The information is sent every second. The gateway analyse the data to find errors and send it to an MQTT broker. Moreover, it is shown in a oled screen. When a problem is detected, a buzzer will sound until a button is pressed. 
+The information is sent every second. The gateway analyse the data to find errors and send it to a MQTT broker. Moreover, it is shown in a oled screen. When a problem is detected, a buzzer will sound until a button is pressed. 
 
 
 And more, much more...
