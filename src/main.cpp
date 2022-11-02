@@ -5,7 +5,6 @@
 *******************************************************************************************************/
 
 #include <Arduino.h>              // =)
-#include <projectConfig.h>        // Project config
 #include <WiFiManager.h>          // Manage WiFi connection and credentials input
 #include <esp32fota.h>            // Over The Air updates over Internet
 #include <Adafruit_GFX.h>         // Oled library      
@@ -13,10 +12,15 @@
 #include <AsyncMqttClient.h>      // MQTT client library
 #include <Lora.h>                 // Manage LoRa connection
 #include <time.h>                 // NTP time
+#include <LoraConf.h>
+#include <mqttconf.h>
+#include <uiConf.h>
+#include <mainConf.h>
 
 
 // Debug
-static const char* TAG = "Main";
+static const char* TAG = __FILE__;
+
 
 
 
@@ -34,14 +38,10 @@ void oledTask(void *);
 void onMqttMessage(char* , char*, AsyncMqttClientMessageProperties, size_t, size_t, size_t);
 void onMqttConnect(bool);
 
-// ---------- ISRs ----------
-void onReceiveLora_ISR(int);
 
 /************************************************
  *                PROTOTYPES END
  ************************************************/
-
-
 
 
 
@@ -53,25 +53,19 @@ WiFiManager wm;
 
 // -------- MQTT  ---------
 AsyncMqttClient mqttClient;
-typedef struct publishElement
-{
-    uint8_t PayloadBuf[MQTT_TOPIC_BUFFER_LENGTH];
-    uint8_t TopicBuf[MQTT_MESSAGE_BUFFER_LENGTH];
-    uint8_t qos;
-    bool retain;
-};
-
 
 // -------- TASK HANDLERS --------
 TaskHandle_t xHandleOtaUpdate = NULL;
 TaskHandle_t xHandleManageConnection = NULL;
 TaskHandle_t xHandleBuzzer = NULL;
 TaskHandle_t xLoraReceive = NULL;
+TaskHandle_t xHandleOled = NULL;
 
 
 // ---------- QUEUE HANDLERS ---------
 QueueHandle_t xQueueLoraIsrToTask;
 QueueHandle_t xQueueSendToMqtt;
+QueueHandle_t xQueueSendToOled;
 
 // -------- OTA UPDATE ----------
 esp32FOTA esp32FOTA("esp32-fota-http", 1);
@@ -99,7 +93,7 @@ void otaUpdate(void * parameters)  {
     {
       esp32FOTA.execOTA();
     }
-    vTaskDelay(pdMS_TO_TICKS(OTA_CHECK_UPDATE_EVERY_MS));
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
@@ -132,13 +126,13 @@ void manageConnection(void * parameters)  {
  *                  MAIN (SETUP + LOOP)
  *************************************************/
 void setup() {
-  // --------- SERIAL MONITOR ---------
+  // --------- DEBUG ---------
   Serial.begin(115200);
+
 
   // --------- IO CONFIG --------
   pinMode(DO_BUZZER, OUTPUT);         // Buzzer
   pinMode(DI_BUTTON, INPUT_PULLUP);   // Button
-
 
 
   // --------- OLED CONFIG --------
@@ -146,20 +140,13 @@ void setup() {
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3c)) { // Address 0x3C for 128x32
      ESP_LOGE(TAG, "SSD1306 allocation failed");
   }
+  display.setTextColor(WHITE, BLACK);
   display.clearDisplay();
-  display.setTextColor(WHITE);
   display.setTextSize(1);
   display.setCursor(32,32);
   display.print("@fguillen96");
   display.display();
 
-
- // --------- LORA CONFIG --------
-  SPI.begin(SCK, MISO, MOSI, SS);
-  LoRa.setPins(SS, RST, DIO0);
-  if (!LoRa.begin(868E6)) ESP_LOGE(TAG, "LoRa module error");
-  LoRa.onReceive(onReceiveLora_ISR);
-  LoRa.receive();
 
 
   // --------- WIFI MANAGER ---------
@@ -167,12 +154,14 @@ void setup() {
   //wm.setTimeout(60);
   //wm.autoConnect("LoRa Gateway");
 
+  ESP_LOGI(TAG, "Connecting to WiFi");
   WiFi.begin("Tortuga", "mwNEGBaAmmsQvA9J496S");
-  while (WiFi.status() != WL_CONNECTED) {
+ /*  while (WiFi.status() != WL_CONNECTED) {
       delay(500);
-      Serial.print(".");
-  }
-  
+  } */
+
+  ESP_LOGI(TAG, "WiFi connected");
+
   // --------- NTP SERVER CONFIG ---------
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   time_t now2 = time(nullptr);
@@ -180,10 +169,12 @@ void setup() {
     delay(500);
     now2 = time(nullptr);
   }
+  ESP_LOGI(TAG, "Time OK: %d", now2);
+
 
   // --------- MQTT CLIENT ---------
   mqttClient.setClientId(MQTT_ID);
-  mqttClient.setWill(TOPIC_PUB_DEV_STAT, 1, true, WILL_MESSAGE);
+  mqttClient.setWill(TOPIC_PUB_DEVICE_INFO, 1, true, WILL_MESSAGE);
   mqttClient.onMessage(onMqttMessage);
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setCredentials(SECRET_MQTT_USERNAME, SECRET_MQTT_PASSWORD);
@@ -195,15 +186,26 @@ void setup() {
 
 
   // --------- QUEUES ---------
-  xQueueLoraIsrToTask = xQueueCreate(QUEUE_ISR_TO_LORA_LENGTH, QUEUE_ISR_TO_LORA_ITEM_SIZE);
-  xQueueSendToMqtt =  xQueueCreate(5, sizeof(publishElement));
+  xQueueLoraIsrToTask = xQueueCreate(QUEUE_ISR_TO_LORA_LENGTH, sizeof(char[LORA_MESSAGE_MAX_LENGTH]));
+  xQueueSendToMqtt =  xQueueCreate(5, sizeof(publishElement_t));
+  xQueueSendToOled =  xQueueCreate(3, sizeof(oledMessage_t));
+
 
 
   // ---------- TASKS  ----------
   //xTaskCreate(otaUpdate, "OTA", 3000, NULL, 5, &xHandleOtaUpdate);
   //xTaskCreate(manageConnection, "Keep WiFi Alive", 2000, NULL, 1, &xHandleManageConnection);
   //xTaskCreate(buzzerTask, "BuzzerAlarm", 1000, NULL, 1, &xHandleBuzzer);
-  xTaskCreatePinnedToCore(dataAnalysisTask, "Lora Gateway", 6000, NULL, 10, &xLoraReceive, 1);
+  xTaskCreatePinnedToCore(oledTask, "Oled Task", 3000, NULL, 1, &xHandleOled, 1);
+  xTaskCreate(dataAnalysisTask, "Lora Gateway", 3500, NULL, 2, &xLoraReceive);
+
+
+  // --------- LORA CONFIG  --------
+  SPI.begin(SCK, MISO, MOSI, SS);
+  LoRa.setPins(SS, RST, DIO0);
+  if (!LoRa.begin(868E6)) ESP_LOGE(TAG, "LoRa module error");
+  LoRa.onReceive(onReceiveLora_ISR);
+  LoRa.receive();
 
 }
 

@@ -3,15 +3,15 @@
  * LoRa Management. Interrupt when LoRa receive. Send data to queue.
 *******************************************************************************************************/
 
+#include <Arduino.h>
 #include <LoRa.h>
-#include <projectConfig.h>
+#include <loraConf.h>
+
 
 // Debug
-static const char* TAG = "Lora";
-
+static const char* TAG = __FILE__;
 
 extern QueueHandle_t  xQueueLoraIsrToTask;
-
 
 void IRAM_ATTR onReceiveLora_ISR(int packetSize) {
   BaseType_t xHigherPriorityTaskWoken;

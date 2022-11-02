@@ -1,11 +1,11 @@
 #include <AsyncMqttClient.h>      // MQTT client library
 #include <ArduinoJson.h>
-#include <projectConfig.h>
+#include <mqttConf.h>
 
 extern AsyncMqttClient mqttClient;
 extern QueueHandle_t xQueueSendToMqtt;
 
-const char* TAG = "mqtt";
+static const char* TAG = __FILE__;
 
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
@@ -31,11 +31,13 @@ void onMqttConnect(bool sessionPresent) {
 }
 
 
+
 void publishMqttTask(void * parameters)  {
-  //publishElement  publishElement_t;
-  // TODO
+  publishElement_t  publishData;
 
   for(;;) {
-    //BaseType_t data_read = xQueueReceive(xQueueSendToMqtt, &lora_buffer, pdMS_TO_TICKS(5000));
+    xQueueReceive(xQueueSendToMqtt, &publishData, portMAX_DELAY);
+    
+    mqttClient.publish(publishData.TopicBuf, publishData.qos, publishData.retain, publishData.PayloadBuf);
   }
 }
